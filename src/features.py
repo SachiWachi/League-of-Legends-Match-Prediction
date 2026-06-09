@@ -32,11 +32,44 @@ def get_champion_features(df):
 
     return champ_features
 
+def get_ban_features(df):
+    """
+    Creates a sparse representation of team bans.
+    1 if Team 1 banned it, -1 if Team 2 banned it, 0 otherwise.
+    Missing bans (0 or NaN) are ignored.
+    """
+    print("Engineering ban features...")
+    ban_cols = [f't1_ban{i}' for i in range(1, 6)] + [f't2_ban{i}' for i in range(1, 6)]
+    
+    # Find all unique ban IDs
+    unique_bans = pd.unique(df[ban_cols].values.ravel())
+    # Remove NaN or 0 (which usually represents 'no ban')
+    unique_bans = [b for b in unique_bans if pd.notna(b) and b != 0]
+    unique_bans.sort()
+    
+    ban_features = pd.DataFrame(0, index=df.index, columns=[f'ban_{int(b)}' for b in unique_bans])
+    
+    for i in range(1, 6):
+        # Add 1 for team 1 bans
+        t1_bans = df[f't1_ban{i}']
+        for idx, val in t1_bans.items():
+            if pd.notna(val) and val != 0:
+                ban_features.at[idx, f'ban_{int(val)}'] = 1
+                
+        # Subtract 1 for team 2 bans
+        t2_bans = df[f't2_ban{i}']
+        for idx, val in t2_bans.items():
+             if pd.notna(val) and val != 0:
+                ban_features.at[idx, f'ban_{int(val)}'] = -1
+
+    return ban_features
+
 def prepare_early_game_features(df):
     """
     Prepares features available early in the game to avoid data leakage.
     Includes:
     - Champion compositions
+    - Team Bans
     - First objectives (Blood, Tower, Dragon, Rift Herald)
     """
     print("Preparing Early-Game features...")
@@ -49,9 +82,12 @@ def prepare_early_game_features(df):
     for col in early_cols:
         X_early[col] = X_early[col].map({0: 0, 1: 1, 2: -1})
     
-    # Add champion features
+    # Add champion features and ban features
     champ_feats = get_champion_features(df)
-    X = pd.concat([X_early, champ_feats], axis=1)
+    ban_feats = get_ban_features(df)
+    
+    # Concatenate objectives, picks, and bans
+    X = pd.concat([X_early, champ_feats, ban_feats], axis=1)
     
     # Target (1 = Team 1 wins, 0 = Team 2 wins)
     y = df['winner'].map({1: 1, 2: 0})
@@ -64,7 +100,7 @@ def prepare_full_match_features(df):
     (Contains data leakage relative to early prediction).
     """
     print("Preparing Full-Match features...")
-    # Get early features first
+    # Get early features first (which now automatically includes bans)
     X_early, y = prepare_early_game_features(df)
     
     # Add late game objectives
